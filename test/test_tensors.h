@@ -15,7 +15,7 @@
 namespace taco {
 namespace test {
 
-std::vector<std::vector<ModeType>> generateModeTypes(size_t order);
+std::vector<std::vector<ModeTypePack>> generateModeTypes(size_t order);
 std::vector<std::vector<size_t>> generateModeOrderings(size_t order);
 
 template <typename T>
@@ -27,6 +27,14 @@ struct TensorData {
   TensorData(const std::vector<int>& dimensions) :
       dimensions(dimensions) {}
   
+  Tensor<T> makeTensor(const std::string& name, ModeType modeType) const {
+    Tensor<T> t(name, dimensions, modeType);
+    for (auto& value : values) {
+      t.insert(value.first, value.second);
+    }
+    return t;
+  }
+
   Tensor<T> makeTensor(const std::string& name, Format format) const {
     Tensor<T> t(name, dimensions, format);
     for (auto& value : values) {
@@ -41,7 +49,7 @@ struct TensorData {
     }
 
     {
-      std::set<std::vector<int>> coords;
+    std::set<std::vector<size_t>> coords;
       for (const auto& val : tensor) {
         if (!coords.insert(val.first).second) {
           return false;
@@ -49,7 +57,7 @@ struct TensorData {
       }
     }
 
-    vector<std::pair<std::vector<int>,T>> vals;
+    vector<std::pair<std::vector<size_t>,T>> vals;
     for (const auto& val : tensor) {
       if (val.second != 0) {
         vals.push_back(val);
@@ -59,7 +67,13 @@ struct TensorData {
     vector<std::pair<std::vector<int>,T>> expected = this->values;
     std::sort(expected.begin(), expected.end());
     std::sort(vals.begin(), vals.end());
-    return vals == expected;
+
+    if (expected.size() != vals.size()) return false;
+    for (size_t i = 0; i < expected.size(); i++) {
+      if (expected[i].second != vals[i].second) return false;
+      if (vals[i].first != std::vector<size_t>(expected[i].first.begin(), expected[i].first.end())) return false;
+    }
+    return true;
   }
 
   std::vector<int>                           dimensions;
@@ -136,6 +150,7 @@ Tensor<double> d5d(std::string name, Format format);
 Tensor<double> d8a(std::string name, Format format);
 Tensor<double> d8b(std::string name, Format format);
 Tensor<double> d8c(std::string name, Format format);
+Tensor<double> d8d(std::string name, Format format);
 
 Tensor<double> dla(std::string name, Format format);
 Tensor<double> dlb(std::string name, Format format);
@@ -167,6 +182,8 @@ Tensor<double> d33a_CSR(std::string name);
 Tensor<double> d33a_CSC(std::string name);
 Tensor<double> d35a_CSR(std::string name);
 Tensor<double> d35a_CSC(std::string name);
+
+Tensor<double> d33a(std::string name, ModeType modeType);
 
 TensorBase readTestTensor(std::string filename, Format format=Sparse);
 

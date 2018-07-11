@@ -3,10 +3,11 @@
 
 #include <memory>
 #include <ostream>
+#include <taco/type.h>
+#include <taco/storage/typed_value.h>
+#include "taco/util/collections.h"
 
 namespace taco {
-class Type;
-namespace storage {
 
 /// An array is a smart pointer to raw memory together with an element type,
 /// a size (number of elements) and a reclamation policy.
@@ -21,10 +22,10 @@ public:
   Array();
 
   /// Construct an array of elements of the given type.
-  Array(Type type, void* data, size_t size, Policy policy=Free);
+  Array(Datatype type, void* data, size_t size, Policy policy=Free);
 
   /// Returns the type of the array elements
-  const Type& getType() const;
+  const Datatype& getType() const;
 
   /// Returns the number of array elements
   size_t getSize() const;
@@ -35,6 +36,11 @@ public:
   void* getData();
   /// @}
 
+  /// Gets the value at a given index
+  TypedComponentRef get(int index) const;
+  /// Gets the value at a given index
+  TypedComponentRef operator[] (const int index) const;
+
   /// Zero the array content
   void zero();
 
@@ -43,9 +49,35 @@ private:
   std::shared_ptr<Content> content;
 };
 
-/// Send the array data as text to a stream.
+/// Print the array.
 std::ostream& operator<<(std::ostream&, const Array&);
+
+/// Print the array policy.
 std::ostream& operator<<(std::ostream&, Array::Policy);
 
-}}
+/// Construct an index array. The ownership policy determines whether the
+/// mode index will free/delete the memory or leave the responsibility for
+/// freeing to the user.
+template <typename T>
+Array makeArray(T* data, size_t size, Array::Policy policy=Array::UserOwns) {
+  return Array(type<T>(), data, size, policy);
+}
+
+/// Construct an array of elements of the given type.
+Array makeArray(Datatype type, size_t size);
+
+/// Construct an Array from the values.
+template <typename T>
+Array makeArray(const std::vector<T>& values) {
+  return makeArray(util::copyToArray(values), values.size(), Array::Free);
+}
+
+/// Construct an Array from the values.
+template <typename T>
+Array makeArray(const std::initializer_list<T>& values) {
+  return makeArray(util::copyToArray(values), values.size(), Array::Free);
+}
+
+}
 #endif
+

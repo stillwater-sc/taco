@@ -6,18 +6,18 @@
 #include <map>
 #include <memory>
 
-#include "taco/tensor.h"
-#include "taco/expr.h"
+#include "taco.h"
+
 #include "taco/error.h"
 #include "taco/parser/parser.h"
 #include "taco/storage/storage.h"
-
 #include "taco/ir/ir.h"
 #include "lower/lower_codegen.h"
 #include "lower/iterators.h"
-#include "lower/iteration_schedule.h"
+#include "lower/iteration_graph.h"
 #include "lower/merge_lattice.h"
 #include "taco/util/strings.h"
+#include "taco/util/files.h"
 #include "taco/util/timers.h"
 #include "taco/util/fill.h"
 #include "taco/util/env.h"
@@ -94,6 +94,14 @@ static void printUsageInfo() {
             "All formats default to dense. "
             "Examples: A:ds, b:d and D:sss.");
   cout << endl;
+  printFlag("t=<tensor>:<data type>",
+            "Specify the data type of a tensor (defaults to double)."
+            "Currently loaded tensors must be double."
+            "Available types: uint8, uint16, uint32, uint64, uchar, ushort, uint, ulong, ulonglong,"
+            "int8, int16, int32, int64, char, short, int, long, longlong,"
+            "float, double, complexfloat, complexdouble"
+            "Examples: A:uint16, b:long and D:complexfloat.");
+  cout << endl;
   printFlag("c",
             "Generate compute kernel that simultaneously does assembly.");
   cout << endl;
@@ -145,6 +153,9 @@ static void printUsageInfo() {
   printFlag("print-assembly",
             "Print the assembly kernel.");
   cout << endl;
+  printFlag("print-iteration-graph",
+            "Print the iteration graph of this expression in the dot format.");
+  cout << endl;
   printFlag("print-lattice=<var>",
             "Print merge lattice for an index variable.");
   cout << endl;
@@ -178,6 +189,7 @@ int main(int argc, char* argv[]) {
   bool printCompute        = false;
   bool printAssemble       = false;
   bool printLattice        = false;
+  bool printIterationGraph = false;
   bool writeCompute        = false;
   bool writeAssemble       = false;
   bool writeKernels        = false;
@@ -200,6 +212,7 @@ int main(int argc, char* argv[]) {
   string exprStr;
   map<string,Format> formats;
   map<string,std::vector<int>> tensorsDimensions;
+  map<string,Datatype> dataTypes;
   map<string,taco::util::FillMethod> tensorsFill;
   map<string,string> inputFilenames;
   map<string,string> outputFilenames;
@@ -230,7 +243,7 @@ int main(int argc, char* argv[]) {
       }
       string tensorName = descriptor[0];
       string formatString = descriptor[1];
-      std::vector<ModeType> modeTypes;
+      std::vector<ModeTypePack> modeTypes;
       std::vector<size_t> modeOrdering;
       for (size_t i = 0; i < formatString.size(); i++) {
         switch (formatString[i]) {
@@ -254,6 +267,39 @@ int main(int argc, char* argv[]) {
         }
       }
       formats.insert({tensorName, Format(modeTypes, modeOrdering)});
+    }
+    else if ("-t" == argName) {
+      vector<string> descriptor = util::split(argValue, ":");
+      if (descriptor.size() != 2) {
+        return reportError("Incorrect format descriptor", 3);
+      }
+      string tensorName = descriptor[0];
+      string typesString = descriptor[1];
+      Datatype dataType;
+      if (typesString == "uint8") dataType = UInt8;
+      else if(typesString == "uint16") dataType = UInt16;
+      else if(typesString == "uint32") dataType = UInt32;
+      else if(typesString == "uint64") dataType = UInt64;
+      else if(typesString == "uchar") dataType = type<unsigned char>();
+      else if(typesString == "ushort") dataType = type<unsigned short>();
+      else if(typesString == "uint") dataType = type<unsigned int>();
+      else if(typesString == "ulong") dataType = type<unsigned long>();
+      else if(typesString == "ulonglong") dataType = type<unsigned long long>();
+      else if(typesString == "int8") dataType = Int8;
+      else if(typesString == "int16") dataType = Int16;
+      else if(typesString == "int32") dataType = Int32;
+      else if(typesString == "int64") dataType = Int64;
+      else if(typesString == "char") dataType = type<char>();
+      else if(typesString == "short") dataType = type<short>();
+      else if(typesString == "int") dataType = type<int>();
+      else if(typesString == "long") dataType = type<long>();
+      else if(typesString == "longlong") dataType = type<long long>();
+      else if(typesString == "float") dataType = Float32;
+      else if(typesString == "double") dataType = Float64;
+      else if(typesString == "complexfloat") dataType = Complex64;
+      else if(typesString == "complexdouble") dataType = Complex128;
+      else return reportError("Incorrect format descriptor", 3);
+      dataTypes.insert({tensorName, dataType});
     }
     else if ("-d" == argName) {
       vector<string> descriptor = util::split(argValue, ":");
@@ -352,6 +398,9 @@ int main(int argc, char* argv[]) {
     else if ("-print-assembly" == argName) {
       printAssemble = true;
     }
+    else if ("-print-iteration-graph" == argName) {
+      printIterationGraph = true;
+    }
     else if ("-print-lattice" == argName) {
       indexVarName = argValue;
       printLattice = true;
@@ -403,8 +452,8 @@ int main(int argc, char* argv[]) {
   }
 
   // Print compute is the default if nothing else was asked for
-  if (!printAssemble && !printLattice && !loaded && !writeCompute && 
-      !writeAssemble && !writeKernels && !readKernels) {
+  if (!printAssemble && !printIterationGraph && !printLattice && !loaded &&
+      !writeCompute && !writeAssemble && !writeKernels && !readKernels) {
     printCompute = true;
   }
 
@@ -415,6 +464,10 @@ int main(int argc, char* argv[]) {
   for (auto& tensorNames : inputFilenames) {
     string name     = tensorNames.first;
     string filename = tensorNames.second;
+    
+    if (util::contains(dataTypes, name) && dataTypes.at(name) != Float64) {
+      return reportError("Loaded tensors can only be type double", 7);
+    }
 
     Format format = util::contains(formats, name) ? formats.at(name) : Dense;
     TensorBase tensor;
@@ -437,7 +490,7 @@ int main(int argc, char* argv[]) {
   }
 
   TensorBase tensor;
-  parser::Parser parser(exprStr, formats, tensorsDimensions, loadedTensors, 42);
+  parser::Parser parser(exprStr, formats, dataTypes, tensorsDimensions, loadedTensors, 42);
   try {
     parser.parse();
     tensor = parser.getResultTensor();
@@ -487,8 +540,8 @@ int main(int argc, char* argv[]) {
     for (auto& kernelFilename : kernelFilenames) {
       TensorBase kernelTensor;
 
-      std::ifstream filestream;
-      filestream.open(kernelFilename, std::ifstream::in);
+      std::fstream filestream;
+      util::openStream(filestream, kernelFilename, ifstream::in);
       string kernelSource((std::istreambuf_iterator<char>(filestream)),
                           std::istreambuf_iterator<char>());
       filestream.close();
@@ -497,7 +550,7 @@ int main(int argc, char* argv[]) {
       try {
         auto operands = parser.getTensors();
         operands.erase(parser.getResultTensor().getName());
-        parser::Parser parser2(exprStr, formats, tensorsDimensions,
+        parser::Parser parser2(exprStr, formats, dataTypes, tensorsDimensions,
                                operands, 42);
         parser2.parse();
         kernelTensor = parser2.getResultTensor();
@@ -524,10 +577,10 @@ int main(int argc, char* argv[]) {
         bool eq = equals(kernelTensor, tensor);
         cout << "done" << endl;
         if (!eq) {
-          string errorMessage =
-              "Results computed with " + kernelFilename +
-              " differ from those computed with the expression.";
-          cerr << "Error: " << errorMessage << endl;
+          cerr << "Error: " << "Results computed with " << kernelFilename <<
+              " differ from those computed with the expression." <<
+              "  Actual: " << kernelTensor << endl <<
+              "Expected: " << tensor << endl;
           return 7;
         }
       }
@@ -561,19 +614,29 @@ int main(int argc, char* argv[]) {
     std::cout << std::endl;
   }
 
+  old::IterationGraph iterationGraph =
+      old::IterationGraph::make(tensor.getAssignment());
+
+  if (printIterationGraph) {
+    if (hasPrinted) {
+      cout << endl << endl;
+    }
+    iterationGraph.printAsDot(cout);
+    hasPrinted = true;
+  }
+
   if (printLattice) {
     if (hasPrinted) {
       cout << endl << endl;
     }
     IndexVar indexVar = parser.getIndexVar(indexVarName);
-    lower::IterationSchedule schedule = lower::IterationSchedule::make(tensor);
-    map<TensorBase,ir::Expr> tensorVars;
-    tie(std::ignore, std::ignore, tensorVars) = lower::getTensorVars(tensor);
-    lower::Iterators iterators(schedule, tensorVars);
-    auto lattice = lower::MergeLattice::make(tensor.getExpr(), indexVar,
-                                             schedule, iterators);
+    map<TensorVar,ir::Expr> tensorVars;
+    tie(ignore,ignore,tensorVars) = old::getTensorVars(tensor.getAssignment());
+    old::Iterators iterators(iterationGraph, tensorVars);
+    auto lattice =
+        MergeLattice::make(tensor.getAssignment().getRhs(),
+                           indexVar, iterationGraph, iterators);
     cout << lattice << endl;
-    hasPrinted = true;
   }
   
   if (writeTime) {

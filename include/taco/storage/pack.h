@@ -6,29 +6,47 @@
 #ifndef TACO_STORAGE_PACK_H
 #define TACO_STORAGE_PACK_H
 
+#include <climits>
 #include <vector>
 
+#include "taco/type.h"
+#include "taco/format.h"
+#include "taco/storage/typed_vector.h"
+#include "taco/storage/storage.h"
+#include "taco/storage/coordinate.h"
+ 
 namespace taco {
-class Format;
+
 namespace ir {
 class Stmt;
 }
-namespace storage {
-class Storage;
 
-/// Pack tensor coordinates into a format. The coordinates must be stored as a
-/// structure of arrays, that is one vector per axis coordinate and one vector
-/// for the values. The coordinates must be sorted lexicographically.
-Storage pack(const std::vector<int>&              dimensions,
-             const Format&                        format,
-             const std::vector<std::vector<int>>& coordinates,
-             const std::vector<double>            values);
+TensorStorage pack(Datatype                             datatype,
+                   const std::vector<int>&              dimensions,
+                   const Format&                        format,
+                   const std::vector<TypedIndexVector>& coordinates,
+                   const void*                          values);
 
-/// Generate code to pack tensor coordinates into a specific format. In the
-/// generated code the coordinates must be stored as a structure of arrays,
-/// that is one vector per axis coordinate and one vector for the values.
-/// The coordinates must be sorted lexicographically.
-ir::Stmt packCode(const Format& format);
 
-}}
+template<typename V, size_t O, typename C>
+TensorStorage pack(std::vector<int> dimensions, Format format,
+                   const std::vector<std::pair<Coordinate<O,C>,V>>& components){
+  size_t order = dimensions.size();
+  size_t num = components.size();
+
+  std::vector<TypedIndexVector> coordinates(order,
+                                            TypedIndexVector(type<C>(), num));
+  std::vector<V> values(num);
+  for (size_t i = 0; i < num; i++) {
+    values[i] = components[i].second;
+    auto& coords = components[i].first;
+    for (size_t j = 0; j < order; j++) {
+      coordinates[j][i] = coords[j];
+    }
+  }
+
+  return pack(type<V>(), dimensions, format, coordinates, values.data());
+}
+
+}
 #endif

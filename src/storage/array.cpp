@@ -11,10 +11,9 @@
 using namespace std;
 
 namespace taco {
-namespace storage {
 
 struct Array::Content : util::Uncopyable {
-  Type   type;
+  Datatype   type;
   void*  data;
   size_t size;
   Policy policy = Array::UserOwns;
@@ -29,52 +28,52 @@ struct Array::Content : util::Uncopyable {
         break;
       case Delete:
         switch (type.getKind()) {
-          case Type::Bool:
+          case Datatype::Bool:
             delete[] ((bool*)data);
             break;
-          case Type::UInt:
-            switch (type.getNumBits()) {
-              case 8:
-                delete[] ((uint8_t*)data);
-                break;
-              case 16:
-                delete[] ((uint16_t*)data);
-                break;
-              case 32:
-                delete[] ((uint32_t*)data);
-                break;
-              case 64:
-                delete[] ((uint64_t*)data);
-                break;
-            }
+          case Datatype::UInt8:
+            delete[] ((uint8_t*)data);
             break;
-          case Type::Int:
-            switch (type.getNumBits()) {
-              case 8:
-                delete[] ((int8_t*)data);
-                break;
-              case 16:
-                delete[] ((int16_t*)data);
-                break;
-              case 32:
-                delete[] ((int32_t*)data);
-                break;
-              case 64:
-                delete[] ((int64_t*)data);
-                break;
-            }
+          case Datatype::UInt16:
+            delete[] ((uint16_t*)data);
             break;
-          case Type::Float:
-            switch (type.getNumBits()) {
-              case 32:
-                delete[] ((float*)data);
-                break;
-              case 64:
-                delete[] ((double*)data);
-                break;
-            }
+          case Datatype::UInt32:
+            delete[] ((uint32_t*)data);
             break;
-          case Type::Undefined:
+          case Datatype::UInt64:
+            delete[] ((uint64_t*)data);
+            break;
+          case Datatype::UInt128:
+            delete[] ((unsigned long long*)data);
+            break;
+          case Datatype::Int8:
+            delete[] ((int8_t*)data);
+            break;
+          case Datatype::Int16:
+            delete[] ((int16_t*)data);
+            break;
+          case Datatype::Int32:
+            delete[] ((int32_t*)data);
+            break;
+          case Datatype::Int64:
+            delete[] ((int64_t*)data);
+            break;
+          case Datatype::Int128:
+            delete[] ((long long*)data);
+            break;
+          case Datatype::Float32:
+            delete[] ((float*)data);
+            break;
+          case Datatype::Float64:
+            delete[] ((double*)data);
+            break;
+          case Datatype::Complex64:
+            delete[] ((std::complex<float>*)data);
+            break;
+          case Datatype::Complex128:
+            delete[] ((std::complex<double>*)data);
+            break;
+          case Datatype::Undefined:
             taco_ierror;
             break;
         }
@@ -86,14 +85,14 @@ struct Array::Content : util::Uncopyable {
 Array::Array() : content(new Content) {
 }
 
-Array::Array(Type type, void* data, size_t size, Policy policy) : Array() {
+Array::Array(Datatype type, void* data, size_t size, Policy policy) : Array() {
   content->type = type;
   content->data = data;
   content->size = size;
   content->policy = policy;
 }
 
-const Type& Array::getType() const {
+const Datatype& Array::getType() const {
   return content->type;
 }
 
@@ -107,6 +106,14 @@ const void* Array::getData() const {
 
 void* Array::getData() {
   return content->data;
+}
+
+TypedComponentRef Array::get(int index) const {
+  return TypedComponentRef(content->type, ((char *) content->data) + content->type.getNumBytes()*index);
+}
+
+TypedComponentRef Array::operator[] (const int index) const {
+  return TypedComponentRef(content->type, ((char *) content->data) + content->type.getNumBytes()*index);
 }
 
 void Array::zero() {
@@ -127,54 +134,54 @@ void printData(ostream& os, const Array& array) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Array& array) {
-  Type type = array.getType();
+  Datatype type = array.getType();
   switch (type.getKind()) {
-    case Type::Bool:
+    case Datatype::Bool:
       printData<bool>(os, array);
       break;
-    case Type::UInt:
-      switch (type.getNumBits()) {
-        case 8:
-          printData<uint8_t>(os, array);
-          break;
-        case 16:
-          printData<uint16_t>(os, array);
-          break;
-        case 32:
-          printData<uint32_t>(os, array);
-          break;
-        case 64:
-          printData<uint64_t>(os, array);
-          break;
-      }
+    case Datatype::UInt8:
+      printData<uint8_t>(os, array);
       break;
-    case Type::Int:
-      switch (type.getNumBits()) {
-        case 8:
-          printData<int8_t>(os, array);
-          break;
-        case 16:
-          printData<int16_t>(os, array);
-          break;
-        case 32:
-          printData<int32_t>(os, array);
-          break;
-        case 64:
-          printData<int64_t>(os, array);
-          break;
-      }
+    case Datatype::UInt16:
+      printData<uint16_t>(os, array);
       break;
-    case Type::Float:
-      switch (type.getNumBits()) {
-        case 32:
-          printData<float>(os, array);
-          break;
-        case 64:
-          printData<double>(os, array);
-          break;
-      }
+    case Datatype::UInt32:
+      printData<uint32_t>(os, array);
       break;
-    case Type::Undefined:
+    case Datatype::UInt64:
+      printData<uint64_t>(os, array);
+      break;
+    case Datatype::UInt128:
+      printData<unsigned long long>(os, array);
+      break;
+    case Datatype::Int8:
+      printData<int8_t>(os, array);
+      break;
+    case Datatype::Int16:
+      printData<int16_t>(os, array);
+      break;
+    case Datatype::Int32:
+      printData<int32_t>(os, array);
+      break;
+    case Datatype::Int64:
+      printData<int64_t>(os, array);
+      break;
+    case Datatype::Int128:
+      printData<long long>(os, array);
+      break;
+    case Datatype::Float32:
+      printData<float>(os, array);
+      break;
+    case Datatype::Float64:
+      printData<double>(os, array);
+      break;
+    case Datatype::Complex64:
+      printData<std::complex<float>>(os, array);
+      break;
+    case Datatype::Complex128:
+      printData<std::complex<double>>(os, array);
+      break;
+    case Datatype::Undefined:
       os << "[]";
       break;
   }
@@ -196,4 +203,8 @@ std::ostream& operator<<(std::ostream& os, Array::Policy policy) {
   return os;
 }
 
-}}
+Array makeArray(Datatype type, size_t size) {
+  return Array(type, malloc(size * type.getNumBytes()), size, Array::Free);
+}
+
+}

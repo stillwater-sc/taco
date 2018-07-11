@@ -5,7 +5,7 @@
 namespace taco {
 namespace test {
 
-std::vector<std::vector<ModeType>> generateModeTypes(size_t order) {
+std::vector<std::vector<ModeTypePack>> generateModeTypes(size_t order) {
   taco_iassert(order > 0);
   std::vector<size_t> divisors(order);
 
@@ -18,20 +18,17 @@ std::vector<std::vector<ModeType>> generateModeTypes(size_t order) {
   
   const size_t numPermutations = numModeTypes * divisors[order - 1];
 
-  std::vector<std::vector<ModeType>> levels(numPermutations);
+  std::vector<std::vector<ModeTypePack>> levels(numPermutations);
   for (size_t i = 0; i < levels.size(); ++i) {
-    std::vector<ModeType> level(order);
+    std::vector<ModeTypePack> level;
     for (size_t j = 0; j < order; ++j) {
       switch ((i / divisors[j]) % numModeTypes) {
         case 0:
-          level[j] = Dense;
+          level.push_back(Dense);
           break;
         case 1:
-          level[j] = Sparse;
+          level.push_back(Sparse);
           break;
-        //case 2:
-        //  level[j] = Fixed;
-        //  break;
         default:
           taco_not_supported_yet;
           break;
@@ -163,6 +160,15 @@ TensorData<double> d8c_data() {
     {{3}, 200},
     {{5}, 300},
     {{7}, 400}
+  });
+}
+
+TensorData<double> d8d_data() {
+  return TensorData<double>({8}, {
+    {{1}, 100},
+    {{2}, 200},
+    {{5}, 300},
+    {{6}, 400}
   });
 }
 
@@ -412,6 +418,10 @@ Tensor<double> d8c(std::string name, Format format) {
   return d8c_data().makeTensor(name, format);
 }
 
+Tensor<double> d8d(std::string name, Format format) {
+  return d8d_data().makeTensor(name, format);
+}
+
 Tensor<double> dla(std::string name, Format format) {
   return dla_data().makeTensor(name, format);
 }
@@ -486,31 +496,35 @@ Tensor<double> d3322a(std::string name, Format format) {
 
 
 Tensor<double> d33a_CSR(std::string name) {
-  return makeCSR(name, {3,3},
+  return makeCSR<double>(name, {3,3},
                  {0, 1, 1, 3},
                  {1, 0, 2},
                  {2.0,3.0,4.0});
 }
 
 Tensor<double> d33a_CSC(std::string name) {
-  return makeCSR(name, {3,3},
+  return makeCSR<double>(name, {3,3},
 					  {0, 1, 2, 3},
 					  {2, 0, 2},
                  {3.0,2.0,4.0});
 }
 
 Tensor<double> d35a_CSR(std::string name) {
-  return makeCSR(name, {3,5},
+  return makeCSR<double>(name, {3,5},
 					  {0, 2, 2, 4},
 					  {0, 1, 0, 3},
                  {2.0,4.0,3.0,5.0});
 }
 
 Tensor<double> d35a_CSC(std::string name) {
-  return makeCSC(name, {3,5},
+  return makeCSC<double>(name, {3,5},
 					  {0, 2, 3, 3, 4, 4},
 					  {0, 2, 0, 2},
                  {2.0,3.0,4.0,5.0});
+}
+
+Tensor<double> d33a(std::string name, ModeType modeType) {
+  return d33a_data().makeTensor(name, modeType);
 }
 
 TensorBase readTestTensor(std::string filename, Format format) {

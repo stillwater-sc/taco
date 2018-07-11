@@ -1,16 +1,15 @@
 #include "taco/storage/index.h"
 
 #include <iostream>
+#include <vector>
 
 #include "taco/format.h"
 #include "taco/error.h"
 #include "taco/storage/array.h"
-#include "taco/storage/array_util.h"
 
 using namespace std;
 
 namespace taco {
-namespace storage {
 
 // class Index
 struct Index::Content {
@@ -19,6 +18,11 @@ struct Index::Content {
 };
 
 Index::Index() : content(new Content) {
+}
+
+Index::Index(const Format& format) : Index() {
+  content->format = format;
+  content->indices = vector<ModeIndex>(format.getOrder());
 }
 
 Index::Index(const Format& format, const std::vector<ModeIndex>& indices)
@@ -41,7 +45,8 @@ const ModeIndex& Index::getModeIndex(size_t mode) const {
 }
 
 ModeIndex Index::getModeIndex(size_t mode) {
-  taco_iassert(size_t(mode) < getFormat().getOrder());
+  taco_iassert(size_t(mode) < getFormat().getOrder())
+      << "mode: " << mode << endl << "order: " << getFormat().getOrder();
   return content->indices[mode];
 }
 
@@ -50,16 +55,12 @@ size_t Index::getSize() const {
   for (size_t i = 0; i < getFormat().getOrder(); i++) {
     auto modeType  = getFormat().getModeTypes()[i];
     auto modeIndex = getModeIndex(i);
-    switch (modeType) {
-      case ModeType::Dense:
-        size *= getValue<size_t>(modeIndex.getIndexArray(0), 0);
-        break;
-      case ModeType::Sparse:
-        size = getValue<size_t>(modeIndex.getIndexArray(0), size);
-        break;
-      case ModeType::Fixed:
-        size *= getValue<size_t>(modeIndex.getIndexArray(0), 0);
-        break;
+    if (modeType == Dense) {
+      size *= modeIndex.getIndexArray(0).get(0).getAsIndex();
+    } else if (modeType == Sparse) {
+      size = modeIndex.getIndexArray(0).get(size).getAsIndex();
+    } else {
+      taco_not_supported_yet;
     }
   }
   return size;
@@ -127,4 +128,4 @@ Index makeCSCIndex(const vector<int>& colptr, const vector<int>& rowidx) {
                      ModeIndex({makeArray(colptr), makeArray(rowidx)})});
 }
 
-}}
+}

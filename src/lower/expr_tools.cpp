@@ -3,16 +3,14 @@
 #include <stack>
 #include <set>
 
-#include "taco/expr.h"
-#include "taco/expr_nodes/expr_nodes.h"
-#include "taco/expr_nodes/expr_visitor.h"
+#include "taco/index_notation/index_notation.h"
+#include "taco/index_notation/index_notation_nodes.h"
+#include "taco/index_notation/index_notation_visitor.h"
 #include "taco/util/collections.h"
 
 using namespace std;
-using namespace taco::expr_nodes;
 
 namespace taco {
-namespace lower {
 
 /// Retrieves the available sub-expression at the index variable
 vector<IndexExpr> getAvailableExpressions(const IndexExpr& expr,
@@ -20,7 +18,7 @@ vector<IndexExpr> getAvailableExpressions(const IndexExpr& expr,
 
   // Available expressions are the maximal sub-expressions that only contain
   // operands whose index variables have all been visited.
-  struct ExtractAvailableExpressions : public expr_nodes::ExprVisitor {
+  struct ExtractAvailableExpressions : public IndexNotationVisitor {
     IndexVar var;
     set<IndexVar> visitedVars;
 
@@ -38,14 +36,19 @@ vector<IndexExpr> getAvailableExpressions(const IndexExpr& expr,
 
       expr.accept(this);
 
-      // Take out available expressions that are just immediates or a scalars.
+      taco_iassert(activeExpressions.size() == 1);
+      if (activeExpressions.top().second) {
+        availableExpressions.push_back(activeExpressions.top().first);
+      }
+
+      // Take out available expressions that are just literals or a scalars.
       // No point in storing these to a temporary.
       // TODO ...
 
       return availableExpressions;
     }
 
-    using expr_nodes::ExprVisitor::visit;
+    using IndexNotationVisitor::visit;
 
     void visit(const AccessNode* op) {
       bool available = true;
@@ -56,6 +59,11 @@ vector<IndexExpr> getAvailableExpressions(const IndexExpr& expr,
         }
       }
       activeExpressions.push({op, available});
+    }
+
+    // Literals are always available and can be computed anywhere
+    void visit(const LiteralNode* op) {
+      activeExpressions.push({op,true});
     }
 
     void visit(const UnaryExprNode* op) {
@@ -91,18 +99,13 @@ vector<IndexExpr> getAvailableExpressions(const IndexExpr& expr,
         activeExpressions.push({op, false});
       }
     }
-
-    // Immediates are always available (can compute them anywhere)
-    void visit(const ImmExprNode* op) {
-      activeExpressions.push({op,true});
-    }
   };
 
   return ExtractAvailableExpressions().get(expr, vars);
 }
 
-IndexExpr getSubExpr(IndexExpr expr, const vector<IndexVar>& vars) {
-  class SubExprVisitor : public ExprVisitor {
+IndexExpr getSubExprOld(IndexExpr expr, const vector<IndexVar>& vars) {
+  class SubExprVisitor : public IndexNotationVisitor {
   public:
     SubExprVisitor(const vector<IndexVar>& vars) {
       this->vars.insert(vars.begin(), vars.end());
@@ -119,9 +122,11 @@ IndexExpr getSubExpr(IndexExpr expr, const vector<IndexVar>& vars) {
     set<IndexVar> vars;
     IndexExpr     subExpr;
 
-    using ExprVisitorStrict::visit;
+    using IndexExprVisitorStrict::visit;
 
     void visit(const AccessNode* op) {
+      // If any variable is in the set of index variables, then the expression
+      // has not been emitted at a previous level, so we keep it.
       for (auto& indexVar : op->indexVars) {
         if (util::contains(vars, indexVar)) {
           subExpr = op;
@@ -131,10 +136,14 @@ IndexExpr getSubExpr(IndexExpr expr, const vector<IndexVar>& vars) {
       subExpr = IndexExpr();
     }
 
+    void visit(const LiteralNode* op) {
+      subExpr = IndexExpr();
+    }
+
     void visit(const UnaryExprNode* op) {
       IndexExpr a = getSubExpression(op->a);
       if (a.defined()) {
-        subExpr = a;
+        subExpr = op;
       }
       else {
         subExpr = IndexExpr();
@@ -157,13 +166,111 @@ IndexExpr getSubExpr(IndexExpr expr, const vector<IndexVar>& vars) {
         subExpr = IndexExpr();
       }
     }
-
-    void visit(const ImmExprNode* op) {
-      subExpr = IndexExpr();
-    }
-
   };
   return SubExprVisitor(vars).getSubExpression(expr);
 }
 
-}}
+class SubExprVisitor : public IndexExprVisitorStrict {
+public:
+  SubExprVisitor(const vector<IndexVar>& vars) {
+    this->vars.insert(vars.begin(), vars.end());
+  }
+
+  IndexExpr getSubExpression(const IndexExpr& expr) {
+    visit(expr);
+    IndexExpr e = subExpr;
+    subExpr = IndexExpr();
+    return e;
+  }
+
+private:
+  set<IndexVar> vars;
+  IndexExpr     subExpr;
+
+  using IndexExprVisitorStrict::visit;
+
+  void visit(const AccessNode* op) {
+    // If any variable is in the set of index variables, then the expression
+    // has not been emitted at a previous level, so we keep it.
+    for (auto& indexVar : op->indexVars) {
+      if (util::contains(vars, indexVar)) {
+        subExpr = op;
+        return;
+      }
+    }
+    subExpr = IndexExpr();
+  }
+
+  void visit(const LiteralNode* op) {
+    subExpr = IndexExpr();
+  }
+
+  template <class T>
+  IndexExpr unarySubExpr(const T* op) {
+    IndexExpr a = getSubExpression(op->a);
+    return a.defined() ? op : IndexExpr();
+  }
+
+  void visit(const NegNode* op) {
+    subExpr = unarySubExpr(op);
+  }
+
+  void visit(const SqrtNode* op) {
+    subExpr = unarySubExpr(op);
+  }
+
+  template <class T>
+  IndexExpr binarySubExpr(const T* op) {
+    IndexExpr a = getSubExpression(op->a);
+    IndexExpr b = getSubExpression(op->b);
+    if (a.defined() && b.defined()) {
+      return new T(a, b);
+    }
+    else if (a.defined()) {
+      return a;
+    }
+    else if (b.defined()) {
+      return b;
+    }
+
+    return IndexExpr();
+  }
+
+  void visit(const AddNode* op) {
+    subExpr = binarySubExpr(op);
+  }
+
+  void visit(const SubNode* op) {
+    subExpr = binarySubExpr(op);
+  }
+
+  void visit(const MulNode* op) {
+    subExpr = binarySubExpr(op);
+  }
+
+  void visit(const DivNode* op) {
+    subExpr = binarySubExpr(op);
+  }
+
+  void visit(const ReductionNode* op) {
+    subExpr = op;
+  }
+
+  void visit(const AssignmentNode* op) {
+    taco_ierror;
+  }
+
+  void visit(const ForallNode* op) {
+    taco_ierror;
+  }
+
+  void visit(const WhereNode* op) {
+    taco_ierror;
+  }
+};
+
+IndexExpr getSubExpr(IndexExpr expr, const vector<IndexVar>& vars) {
+  return SubExprVisitor(vars).getSubExpression(expr);
+}
+
+}

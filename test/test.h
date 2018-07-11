@@ -58,44 +58,33 @@ void ASSERT_VECTOR_EQ(std::vector<T> expected,
   }
 }
 
-template <typename T>
-void ASSERT_TENSOR_EQ(Tensor<T> expected,
-                      Tensor<T> actual) {
-  SCOPED_TRACE(string("expected: ") + util::toString(expected) );
-  SCOPED_TRACE(string("  actual: ") + util::toString(actual) );
-  ASSERT_TRUE(equals(expected, actual));
-}
+void ASSERT_STORAGE_EQ(TensorStorage expected, TensorStorage actual);
+void ASSERT_TENSOR_EQ(TensorBase expected, TensorBase actual);
 
 template <typename T>
-void ASSERT_STORAGE_EQUALS(vector<vector<vector<int>>> expectedIndices,
-                           vector<T> expectedValues,
-                           Tensor<T> actual) {
+void ASSERT_COMPONENTS_EQUALS(vector<vector<vector<int>>> expectedIndices,
+                              vector<T> expectedValues, Tensor<T> actual) {
   auto storage = actual.getStorage();
 
   auto index = storage.getIndex();
   for (size_t i=0; i < storage.getFormat().getOrder(); ++i) {
     auto modeIndex = index.getModeIndex(i);
-    switch (storage.getFormat().getModeTypes()[i]) {
-      case ModeType::Dense: {
-        taco_iassert(expectedIndices[i].size() == 1);
-        ASSERT_EQ(1u, modeIndex.numIndexArrays());
-        auto size = modeIndex.getIndexArray(0);
-        ASSERT_ARRAY_EQ(expectedIndices[i][0],
-                        {(int*)size.getData(), size.getSize()});
-        break;
-      }
-      case ModeType::Sparse:
-      case ModeType::Fixed: {
-        taco_iassert(expectedIndices[i].size() == 2);
-        ASSERT_EQ(2u, modeIndex.numIndexArrays());
-        auto pos = modeIndex.getIndexArray(0);
-        auto idx = modeIndex.getIndexArray(1);
-        ASSERT_ARRAY_EQ(expectedIndices[i][0],
-                        {(int*)pos.getData(), pos.getSize()});
-        ASSERT_ARRAY_EQ(expectedIndices[i][1],
-                        {(int*)idx.getData(), idx.getSize()});
-        break;
-      }
+    auto modeType = storage.getFormat().getModeTypes()[i];
+    if (modeType == ModeType::Dense) {
+      taco_iassert(expectedIndices[i].size() == 1);
+      ASSERT_EQ(1u, modeIndex.numIndexArrays());
+      auto size = modeIndex.getIndexArray(0);
+      ASSERT_ARRAY_EQ(expectedIndices[i][0],
+                      {(int*)size.getData(), size.getSize()});
+    } else if (modeType == ModeType::Sparse) {
+      taco_iassert(expectedIndices[i].size() == 2);
+      ASSERT_EQ(2u, modeIndex.numIndexArrays());
+      auto pos = modeIndex.getIndexArray(0);
+      auto idx = modeIndex.getIndexArray(1);
+      ASSERT_ARRAY_EQ(expectedIndices[i][0],
+                      {(int*)pos.getData(), pos.getSize()});
+      ASSERT_ARRAY_EQ(expectedIndices[i][1],
+                      {(int*)idx.getData(), idx.getSize()});
     }
   }
 
@@ -103,6 +92,13 @@ void ASSERT_STORAGE_EQUALS(vector<vector<vector<int>>> expectedIndices,
   ASSERT_EQ(expectedValues.size(), nnz);
   ASSERT_ARRAY_EQ(expectedValues, {(double*)storage.getValues().getData(),nnz});
 }
+
+#define ASSERT_NOTATION_EQ(expected, actual)  \
+do {                                          \
+  auto ex = taco::util::toString(expected);   \
+  auto ac = taco::util::toString(actual);     \
+  ASSERT_EQ(ex, ac);                          \
+} while (0)
 
 }}
 

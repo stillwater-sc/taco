@@ -2,6 +2,7 @@
 #include "taco/tensor.h"
 
 #include "taco/util/strings.h"
+#include "taco/storage/storage.h"
 
 int main(int argc, char **argv) {
   // If there is just one argument and it is not a gtest option, then filter
@@ -9,17 +10,9 @@ int main(int argc, char **argv) {
   std::string filter;
   if (argc == 2 && std::string(argv[argc-1]).substr(0,2) != "--") {
     filter = std::string(argv[1]);
-
-    char *dotPtr = strchr(argv[1], '.');
-    if (!dotPtr) {
-      filter = "*" + filter + "*";
-      }
-      else if (dotPtr[1] == '\0') {
-        filter = filter + "*";
-      }
-
-      filter = std::string("--gtest_filter=") + filter;
-      argv[1] = (char*)filter.c_str();
+    filter = "*" + filter + "*";
+    filter = std::string("--gtest_filter=") + filter;
+    argv[1] = (char*)filter.c_str();
   }
 
   ::testing::InitGoogleTest(&argc, argv);
@@ -30,6 +23,18 @@ int main(int argc, char **argv) {
 
 namespace taco {
 namespace test {
+
+void ASSERT_STORAGE_EQ(TensorStorage expected, TensorStorage actual) {
+  SCOPED_TRACE("\nexpected:\n" + util::toString(expected) +
+               "\nactual:\n" + util::toString(actual));
+  ASSERT_TRUE(equals(expected, actual));
+}
+
+void ASSERT_TENSOR_EQ(TensorBase expected, TensorBase actual) {
+  SCOPED_TRACE(string("expected: ") + util::toString(expected));
+  SCOPED_TRACE(string("  actual: ") + util::toString(actual));
+  ASSERT_TRUE(equals(expected, actual));
+}
 
 std::string testDirectory() {
   return TO_STRING(TACO_TEST_DIR);

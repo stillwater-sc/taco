@@ -32,6 +32,7 @@ protected:
   virtual void visit(const Min*);
   virtual void visit(const Max*);
   virtual void visit(const BitAnd*);
+  virtual void visit(const BitOr*);
   virtual void visit(const Eq*);
   virtual void visit(const Neq*);
   virtual void visit(const Gt*);
@@ -40,8 +41,10 @@ protected:
   virtual void visit(const Lte*);
   virtual void visit(const And*);
   virtual void visit(const Or*);
+  virtual void visit(const Cast*);
   virtual void visit(const IfThenElse*);
   virtual void visit(const Case*);
+  virtual void visit(const Switch*);
   virtual void visit(const Load*);
   virtual void visit(const Store*);
   virtual void visit(const For*);
@@ -60,7 +63,30 @@ protected:
   int indent;
   bool color;
   bool simplify;
-  bool omitNextParen;
+
+  enum Precedence {
+    FUNC = 2,
+    LOAD = 2,
+    CAST = 3,
+    NEG = 3,
+    MUL = 5,
+    DIV = 5,
+    REM = 5,
+    ADD = 6,
+    SUB = 6,
+    EQ = 10,
+    GT = 9,
+    LT = 9,
+    GTE = 9,
+    LTE = 9,
+    NEQ = 10,
+    BAND = 11,
+    BOR = 11,
+    LAND = 14,
+    LOR = 15,
+    TOP = 20
+  };
+  Precedence parentPrecedence;
 
   util::NameGenerator varNameGenerator;
   util::ScopedMap<Expr, std::string> varNames;
@@ -68,7 +94,7 @@ protected:
   void resetNameCounters();
 
   void doIndent();
-  void printBinOp(Expr a, Expr b, std::string op);
+  void printBinOp(Expr a, Expr b, std::string op, Precedence precedence);
 
   std::string keywordString(std::string);
   std::string commentString(std::string);

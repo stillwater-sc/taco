@@ -9,8 +9,6 @@
 #include "taco/taco_tensor_t.h"
 
 namespace taco {
-
-namespace storage {
 class ModeIndex;
 class Array;
 
@@ -22,7 +20,11 @@ public:
   /// Construct an empty index.
   Index();
 
+  /// Construct an index with the given format.
+  Index(const Format& format);
+
   /// Construct an index with the given format and data.
+  /// TODO DEPRECATE
   Index(const Format& format, const std::vector<ModeIndex>& indices);
 
   /// Returns the index's format.
@@ -88,5 +90,5 @@ Index makeCSCIndex(const std::vector<int>& colptr,
                    const std::vector<int>& rowidx);
 /// @}
 
-}}
+}
 #endif

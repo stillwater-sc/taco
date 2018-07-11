@@ -2,7 +2,6 @@
 #define TACO_IR_H
 
 #include <vector>
-#include "taco/format.h"
 
 #include "taco/type.h"
 #include "taco/error.h"
@@ -28,6 +27,7 @@ enum class IRNodeType {
   Min,
   Max,
   BitAnd,
+  BitOr,
   Not,
   Eq,
   Neq,
@@ -37,8 +37,10 @@ enum class IRNodeType {
   Lte,
   And,
   Or,
+  Cast,
   IfThenElse,
   Case,
+  Switch,
   Load,
   Store,
   For,
@@ -61,7 +63,8 @@ enum class TensorProperty {
   ModeOrdering,
   ModeTypes,
   Indices,
-  Values
+  Values,
+  ValuesSize
 };
 
 /** Base class for backend IR */
@@ -92,7 +95,7 @@ struct BaseStmtNode : public IRNode {
 
 /** Base class for expression nodes, which have a type. */
 struct BaseExprNode : public IRNode {
-  Type type = Type(Type::Float, 64);
+  Datatype type = Float();
 };
 
 /** Use the "curiously recurring template pattern" from Halide
@@ -141,14 +144,17 @@ struct IRHandle : public util::IntrusivePtr<const IRNode> {
 class Expr : public IRHandle {
 public:
   Expr() : IRHandle() {}
+  Expr(bool);
   Expr(int);
-  Expr(float);
+  Expr(long long);
+  Expr(unsigned long long);
+  Expr(std::complex<double>);
   Expr(double);
 
   Expr(const BaseExprNode *expr) : IRHandle(expr) {}
 
   /** Get the type of this expression node */
-  Type type() const {
+  Datatype type() const {
     return ((const BaseExprNode *)ptr)->type;
   }
 };
@@ -176,14 +182,27 @@ std::ostream &operator<<(std::ostream &os, const Expr &);
 /** A literal. */
 struct Literal : public ExprNode<Literal> {
 public:
-  int64_t value;
-  double dbl_value;
+  bool bool_value;
+  long long int_value;
+  unsigned long long uint_value;
+  std::complex<double> complex_value;
+
+  double float_value;
 
   static Expr make(bool val);
   static Expr make(int val);
-  static Expr make(double val, Type type=Type(Type::Float, 64));
+  static Expr make(uint32_t val);
+  static Expr make(long long val);
+  static Expr make(unsigned long long val);
+  static Expr make(std::complex<double> val);
+  static Expr make(double val);
+
+  /// Returns a zero literal of the given type.
+  static Expr zero(Datatype datatype);
 
   static const IRNodeType _type_info = IRNodeType::Literal;
+
+  bool equalsScalar(double scalar) const;
 };
 
 /** A variable.  */
@@ -192,10 +211,9 @@ public:
   std::string name;
   bool is_ptr;
   bool is_tensor;
-  Format format;
 
-  static Expr make(std::string name, Type type, bool is_ptr=false);
-  static Expr make(std::string name, Type type, Format format);
+  static Expr make(std::string name, Datatype type, bool is_ptr=false, 
+                   bool is_tensor=false);
 
   static const IRNodeType _type_info = IRNodeType::Var;
 };
@@ -228,7 +246,7 @@ public:
   Expr b;
 
   static Expr make(Expr a, Expr b);
-  static Expr make(Expr a, Expr b, Type type);
+  static Expr make(Expr a, Expr b, Datatype type);
 
   static const IRNodeType _type_info = IRNodeType::Add;
 };
@@ -240,7 +258,7 @@ public:
   Expr b;
 
   static Expr make(Expr a, Expr b);
-  static Expr make(Expr a, Expr b, Type type);
+  static Expr make(Expr a, Expr b, Datatype type);
 
   static const IRNodeType _type_info = IRNodeType::Sub;
 };
@@ -252,7 +270,7 @@ public:
   Expr b;
 
   static Expr make(Expr a, Expr b);
-  static Expr make(Expr a, Expr b, Type type);
+  static Expr make(Expr a, Expr b, Datatype type);
 
   static const IRNodeType _type_info = IRNodeType::Mul;
 };
@@ -264,7 +282,7 @@ public:
   Expr b;
 
   static Expr make(Expr a, Expr b);
-  static Expr make(Expr a, Expr b, Type type);
+  static Expr make(Expr a, Expr b, Datatype type);
 
   static const IRNodeType _type_info = IRNodeType::Div;
 };
@@ -276,7 +294,7 @@ public:
   Expr b;
 
   static Expr make(Expr a, Expr b);
-  static Expr make(Expr a, Expr b, Type type);
+  static Expr make(Expr a, Expr b, Datatype type);
 
   static const IRNodeType _type_info = IRNodeType::Rem;
 };
@@ -287,9 +305,9 @@ public:
   std::vector<Expr> operands;
 
   static Expr make(Expr a, Expr b);
-  static Expr make(Expr a, Expr b, Type type);
+  static Expr make(Expr a, Expr b, Datatype type);
   static Expr make(std::vector<Expr> operands);
-  static Expr make(std::vector<Expr> operands, Type type);
+  static Expr make(std::vector<Expr> operands, Datatype type);
 
   static const IRNodeType _type_info = IRNodeType::Min;
 };
@@ -301,7 +319,7 @@ public:
   Expr b;
 
   static Expr make(Expr a, Expr b);
-  static Expr make(Expr a, Expr b, Type type);
+  static Expr make(Expr a, Expr b, Datatype type);
 
   static const IRNodeType _type_info = IRNodeType::Max;
 };
@@ -315,6 +333,17 @@ public:
   static Expr make(Expr a, Expr b);
 
   static const IRNodeType _type_info = IRNodeType::BitAnd;
+};
+
+/** Bitwise or: a | b */
+struct BitOr : public ExprNode<BitOr> {
+public:
+  Expr a;
+  Expr b;
+
+  static Expr make(Expr a, Expr b);
+
+  static const IRNodeType _type_info = IRNodeType::BitOr;
 };
 
 /** Equality: a==b. */
@@ -405,6 +434,16 @@ public:
   static const IRNodeType _type_info = IRNodeType::Or;
 };
 
+/** Type cast. */
+struct Cast : public ExprNode<Cast> {
+public:
+  Expr a;
+
+  static Expr make(Expr a, Datatype newType);
+
+  static const IRNodeType _type_info = IRNodeType::Cast;
+};
+
 /** A load from an array: arr[loc]. */
 struct Load : public ExprNode<Load> {
 public:
@@ -475,6 +514,17 @@ public:
   static const IRNodeType _type_info = IRNodeType::Case;
 };
 
+/** A switch statement. */
+struct Switch : public StmtNode<Switch> {
+public:
+  std::vector<std::pair<Expr,Stmt>> cases;
+  Expr controlExpr;
+  
+  static Stmt make(std::vector<std::pair<Expr,Stmt>> cases, Expr controlExpr);
+  
+  static const IRNodeType _type_info = IRNodeType::Switch;
+};
+
 enum class LoopKind {Serial, Static, Dynamic, Vectorized};
 
 /** A for loop from start to end by increment.
@@ -525,8 +575,9 @@ public:
   std::vector<Expr> inputs;
   std::vector<Expr> outputs;
   
-  static Stmt make(std::string name, std::vector<Expr> inputs,
-                   std::vector<Expr> outputs, Stmt body);
+  static Stmt make(std::string name,
+                   std::vector<Expr> outputs, std::vector<Expr> inputs,
+                   Stmt body);
   
   static const IRNodeType _type_info = IRNodeType::Function;
 };

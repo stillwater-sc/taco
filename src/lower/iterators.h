@@ -1,65 +1,55 @@
 #ifndef TACO_LOWER_ITERATORS_H
 #define TACO_LOWER_ITERATORS_H
 
-#include "iteration_schedule.h"
+#include "iteration_graph.h"
 #include "tensor_path.h"
 #include "storage/iterator.h"
 
 #include <map>
+#include <vector>
+#include <memory>
 
 namespace taco {
-class TensorBase;
+class TensorVar;
+class Iterator;
 
 namespace ir {
 class Expr;
 }
 
-namespace lower {
+namespace old {
 
-/// Tracks the per-edge iterators of the tensor paths of an iteration schedule.
+/// Tracks the per-edge iterators of the tensor paths of an iteration graph.
 class Iterators {
 public:
   Iterators();
 
-  Iterators(const IterationSchedule& schedule,
-            const std::map<TensorBase,ir::Expr>& tensorVariables);
+  Iterators(const IterationGraph& graph,
+            const std::map<TensorVar,ir::Expr>& tensorVariables);
 
   /// Returns the root iterator.
   /// TODO: Should each path have a 0 step that's the root, so that we can use
   /// operator[] to get the root (with step 0)?
-  const storage::Iterator& getRoot(const TensorPath&) const;
+  const Iterator& getRoot(const TensorPath&) const;
 
   /// Returns the iterator for the step.
-  const storage::Iterator& operator[](const TensorPathStep&) const;
+  const Iterator& operator[](const TensorPathStep&) const;
 
   /// Returns the iterators for the steps.
-  std::vector<storage::Iterator>
-  operator[](const std::vector<TensorPathStep>&) const;
+  std::vector<Iterator> operator[](const std::vector<TensorPathStep>&) const;
 
 private:
-  std::map<TensorPath, storage::Iterator> roots;
-  std::map<TensorPathStep, storage::Iterator> iterators;
+  std::map<TensorPath, Iterator> roots;
+  std::map<TensorPathStep, Iterator> iterators;
+  std::vector<std::unique_ptr<ModePack>> modePacks;
 };
 
 
-/// Returns true iff the iterators must be merged, false otherwise. Iterators
-/// must be merged iff two or more of them are not random access.
-bool needsMerge(const std::vector<storage::Iterator>&);
-
-/// Returns the dense iterators
-std::vector<storage::Iterator>
-getDenseIterators(const std::vector<storage::Iterator>&);
-
-/// Returns the sequential access iterators
-std::vector<storage::Iterator>
-getSequentialAccessIterators(const std::vector<storage::Iterator>&);
-
-/// Returns the random access iterators
-std::vector<storage::Iterator>
-getRandomAccessIterators(const std::vector<storage::Iterator>&);
+/// Returns the iterators over full dimensions
+std::vector<Iterator> getFullIterators(const std::vector<Iterator>&);
 
 /// Returns the idx vars of the iterators.
-std::vector<ir::Expr> getIdxVars(const std::vector<storage::Iterator>&);
+std::vector<ir::Expr> getIdxVars(const std::vector<Iterator>&);
 
 }}
 #endif

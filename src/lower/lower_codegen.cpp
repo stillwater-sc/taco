@@ -2,66 +2,86 @@
 
 #include <set>
 
-#include "taco/tensor.h"
-#include "taco/expr.h"
-#include "taco/expr_nodes/expr_nodes.h"
+#include "taco/index_notation/index_notation.h"
+#include "taco/index_notation/index_notation_nodes.h"
 #include "iterators.h"
-#include "iteration_schedule.h"
+#include "iteration_graph.h"
 #include "taco/ir/ir.h"
 #include "taco/util/strings.h"
 #include "taco/util/collections.h"
 
 using namespace std;
 using namespace taco::ir;
-using namespace taco::expr_nodes;
 
 namespace taco {
-namespace lower {
+namespace old {
+
+static vector<TensorVar> getOperands(const IndexExpr& expr) {
+  struct GetOperands : public IndexNotationVisitor {
+    using IndexNotationVisitor::visit;
+    set<TensorVar> inserted;
+    vector<TensorVar> operands;
+    void visit(const AccessNode* node) {
+      TensorVar tensor = node->tensorVar;
+      if (!util::contains(inserted, tensor)) {
+        inserted.insert(tensor);
+        operands.push_back(tensor);
+      }
+    }
+  };
+  GetOperands getOperands;
+  expr.accept(&getOperands);
+  return getOperands.operands;
+}
 
 std::tuple<std::vector<ir::Expr>,         // parameters
            std::vector<ir::Expr>,         // results
-           std::map<TensorBase,ir::Expr>> // mapping
-getTensorVars(const TensorBase& tensor) {
+           std::map<TensorVar,ir::Expr>>  // mapping
+getTensorVars(Assignment assignment) {
   vector<ir::Expr> parameters;
   vector<ir::Expr> results;
-  map<TensorBase, ir::Expr> mapping;
+  map<TensorVar, ir::Expr> mapping;
+
+  TensorVar tensor = assignment.getLhs().getTensorVar();
 
   // Pack result tensor into output parameter list
-  ir::Expr tensorVar = ir::Var::make(tensor.getName(), Type(Type::Float,64),
-                                     tensor.getFormat());
-  mapping.insert({tensor, tensorVar});
-  results.push_back(tensorVar);
+  ir::Expr tensorVarExpr = ir::Var::make(tensor.getName(),
+                                         tensor.getType().getDataType(), true, 
+                                         true);
+  mapping.insert({tensor, tensorVarExpr});
+  results.push_back(tensorVarExpr);
 
   // Pack operand tensors into input parameter list
-  vector<TensorBase> operands = expr_nodes::getOperands(tensor.getExpr());
-  for (TensorBase& operand : operands) {
+  for (TensorVar operand : getOperands(assignment.getRhs())) {
+    ir::Expr operandVarExpr = ir::Var::make(operand.getName(),
+                                           operand.getType().getDataType(), 
+                                           true, true);
     taco_iassert(!util::contains(mapping, operand));
-    ir::Expr operandVar = ir::Var::make(operand.getName(), Type(Type::Float,64),
-                                        operand.getFormat());
-    mapping.insert({operand, operandVar});
-    parameters.push_back(operandVar);
+    mapping.insert({operand, operandVarExpr});
+    parameters.push_back(operandVarExpr);
   }
 
   return std::tuple<std::vector<ir::Expr>, std::vector<ir::Expr>,
-      std::map<TensorBase,ir::Expr>> {parameters, results, mapping};
+      std::map<TensorVar,ir::Expr>> {parameters, results, mapping};
 }
 
 ir::Expr lowerToScalarExpression(const IndexExpr& indexExpr,
                                  const Iterators& iterators,
-                                 const IterationSchedule& schedule,
-                                 const map<TensorBase,ir::Expr>& temporaries) {
+                                 const IterationGraph& iterationGraph,
+                                 const map<TensorVar,ir::Expr>& temporaries) {
 
-  class ScalarCode : public expr_nodes::ExprVisitorStrict {
-    using expr_nodes::ExprVisitorStrict::visit;
+  class ScalarCode : public IndexExprVisitorStrict {
+    using IndexExprVisitorStrict::visit;
 
   public:
     const Iterators& iterators;
-    const IterationSchedule& schedule;
-    const map<TensorBase,ir::Expr>& temporaries;
+    const IterationGraph& iterationGraph;
+    const map<TensorVar,ir::Expr>& temporaries;
     ScalarCode(const Iterators& iterators,
-                 const IterationSchedule& schedule,
-                 const map<TensorBase,ir::Expr>& temporaries)
-        : iterators(iterators), schedule(schedule), temporaries(temporaries) {}
+               const IterationGraph& iterationGraph,
+               const map<TensorVar,ir::Expr>& temporaries)
+        : iterators(iterators), iterationGraph(iterationGraph),
+          temporaries(temporaries) {}
 
     ir::Expr expr;
     ir::Expr lower(const IndexExpr& indexExpr) {
@@ -72,19 +92,72 @@ ir::Expr lowerToScalarExpression(const IndexExpr& indexExpr,
     }
 
     void visit(const AccessNode* op) {
-      if (util::contains(temporaries, op->tensor)) {
-        expr = temporaries.at(op->tensor);
+      if (util::contains(temporaries, op->tensorVar)) {
+        expr = temporaries.at(op->tensorVar);
         return;
       }
-      TensorPath path = schedule.getTensorPath(op);
-      storage::Iterator iterator = (op->tensor.getOrder() == 0)
+      TensorPath path = iterationGraph.getTensorPath(op);
+      Type type = op->tensorVar.getType();
+      Iterator iterator = (type.getShape().getOrder() == 0)
           ? iterators.getRoot(path)
           : iterators[path.getLastStep()];
-      ir::Expr ptr = iterator.getPtrVar();
+      ir::Expr pos = iterator.getPosVar();
       ir::Expr values = GetProperty::make(iterator.getTensor(),
                                           TensorProperty::Values);
-      ir::Expr loadValue = Load::make(values, ptr);
+      ir::Expr loadValue = Load::make(values, pos);
       expr = loadValue;
+    }
+
+    void visit(const LiteralNode* op) {
+      switch (op->getDataType().getKind()) {
+        case Datatype::Bool:
+          taco_not_supported_yet;
+          break;
+        case Datatype::UInt8:
+          expr = ir::Expr((unsigned long long)op->getVal<uint8_t>());
+          break;
+        case Datatype::UInt16:
+          expr = ir::Expr((unsigned long long)op->getVal<uint16_t>());
+          break;
+        case Datatype::UInt32:
+          expr = ir::Expr((unsigned long long)op->getVal<uint32_t>());
+          break;
+        case Datatype::UInt64:
+          expr = ir::Expr((unsigned long long)op->getVal<uint64_t>());
+          break;
+        case Datatype::UInt128:
+          taco_not_supported_yet;
+          break;
+        case Datatype::Int8:
+          expr = ir::Expr((long long)op->getVal<int8_t>());
+          break;
+        case Datatype::Int16:
+          expr = ir::Expr((long long)op->getVal<int16_t>());
+          break;
+        case Datatype::Int32:
+          expr = ir::Expr((long long)op->getVal<int32_t>());
+          break;
+        case Datatype::Int64:
+          expr = ir::Expr((long long)op->getVal<int64_t>());
+          break;
+        case Datatype::Int128:
+          taco_not_supported_yet;
+          break;
+        case Datatype::Float32:
+          expr = ir::Expr(op->getVal<float>());
+          break;
+        case Datatype::Float64:
+          expr = ir::Expr(op->getVal<double>());
+          break;
+        case Datatype::Complex64:
+          expr = ir::Expr(op->getVal<std::complex<float>>());
+          break;
+        case Datatype::Complex128:
+          expr = ir::Expr(op->getVal<std::complex<double>>());
+          break;
+        case Datatype::Undefined:
+          break;
+      }
     }
 
     void visit(const NegNode* op) {
@@ -111,41 +184,75 @@ ir::Expr lowerToScalarExpression(const IndexExpr& indexExpr,
       expr = ir::Div::make(lower(op->a), lower(op->b));
     }
 
-    void visit(const IntImmNode* op) {
-      expr = ir::Expr(op->val);
-    }
-
-    void visit(const FloatImmNode* op) {
-      expr = ir::Expr(op->val);
-    }
-
-    void visit(const DoubleImmNode* op) {
-      expr = ir::Expr(op->val);
+    void visit(const ReductionNode* op) {
+      expr = lower(op->a);
     }
   };
-  return ScalarCode(iterators,schedule,temporaries).lower(indexExpr);
+  return ScalarCode(iterators,iterationGraph,temporaries).lower(indexExpr);
 }
 
 ir::Stmt mergePathIndexVars(ir::Expr var, vector<ir::Expr> pathVars){
   return ir::VarAssign::make(var, ir::Min::make(pathVars));
 }
 
-ir::Expr min(std::string resultName,
-             const std::vector<storage::Iterator>& iterators,
+ir::Expr min(const std::string resultName,
+             const std::vector<Iterator>& iterators,
              std::vector<Stmt>* statements) {
   taco_iassert(iterators.size() > 0);
   taco_iassert(statements != nullptr);
-  ir::Expr minVar;
-  if (iterators.size() > 1) {
-    minVar = ir::Var::make(resultName, Type(Type::Int));
-    ir::Expr minExpr = ir::Min::make(getIdxVars(iterators));
-    ir::Stmt initIdxStmt = ir::VarAssign::make(minVar, minExpr, true);
-    statements->push_back(initIdxStmt);
+
+  if (iterators.size() == 1) {
+    return iterators[0].getIdxVar();
   }
-  else {
-    minVar = iterators[0].getIdxVar();
+
+  for (const auto& iterator : iterators) {
+    if (iterator.isFull()) {
+      return iterator.getIdxVar();
+    }
   }
+
+  ir::Expr minVar = ir::Var::make(resultName, Int());
+  ir::Expr minExpr = ir::Min::make(getIdxVars(iterators));
+  ir::Stmt initIdxStmt = ir::VarAssign::make(minVar, minExpr, true);
+  statements->push_back(initIdxStmt);
+  
   return minVar;
+}
+
+std::pair<ir::Expr,ir::Expr>
+minWithIndicator(const std::string resultName,
+                 const std::vector<Iterator>& iterators,
+                 std::vector<Stmt>* statements) {
+  taco_iassert(iterators.size() >= 2 && 
+               iterators.size() <= UInt().getNumBits());
+  taco_iassert(statements != nullptr);
+  ir::Expr minVar = ir::Var::make(resultName, Int());
+  ir::Expr minInd = ir::Var::make(std::string("c") + resultName, UInt());
+ 
+  ir::Stmt initMinIdx = ir::VarAssign::make(minVar, 
+                                             iterators[0].getIdxVar(), true);
+  ir::Stmt initMinInd = ir::VarAssign::make(minInd, 1ull, true);
+  statements->push_back(initMinIdx);
+  statements->push_back(initMinInd);
+
+  for (size_t i = 1; i < iterators.size(); ++i) {
+    ir::Expr idxVar = iterators[i].getIdxVar();
+    
+    ir::Expr checkLt = ir::Lt::make(idxVar, minVar);
+    ir::Stmt replaceMinVar = ir::VarAssign::make(minVar, idxVar);
+    ir::Stmt replaceMinInd = ir::VarAssign::make(minInd, 1ull << i);
+    ir::Stmt replaceStmts = ir::Block::make({replaceMinVar, replaceMinInd});
+    
+    ir::Expr checkEq = ir::Eq::make(idxVar, minVar);
+    ir::Expr newBit = ir::Mul::make(1ull << i, ir::Cast::make(checkEq, UInt()));
+    ir::Expr newInd = ir::BitOr::make(minInd, newBit);
+    ir::Stmt updateMinInd = ir::VarAssign::make(minInd, newInd);
+
+    ir::Stmt checkIdxVar = ir::IfThenElse::make(checkLt, replaceStmts, 
+                                                updateMinInd);
+    statements->push_back(checkIdxVar);
+  }
+  return std::make_pair(minVar, minInd);
 }
 
 vector<ir::Stmt> printCoordinate(const vector<ir::Expr>& indexVars) {

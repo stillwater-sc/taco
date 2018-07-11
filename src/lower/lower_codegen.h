@@ -6,39 +6,45 @@
 #include <map>
 
 namespace taco {
-class TensorBase;
+class TensorVar;
 class IndexExpr;
-namespace storage {
+class Assignment;
 class Iterator;
-}
+
 namespace ir {
 class Stmt;
 class Expr;
 }
 
-namespace lower {
-class IterationSchedule;
-class Iterators;
+namespace old {
 
-std::tuple<std::vector<ir::Expr>,         // parameters
-           std::vector<ir::Expr>,         // results
-           std::map<TensorBase,ir::Expr>> // mapping
-getTensorVars(const TensorBase&);
+class Iterators;
+class IterationGraph;
+
+std::tuple<std::vector<ir::Expr>,        // parameters
+           std::vector<ir::Expr>,        // results
+           std::map<TensorVar,ir::Expr>> // mapping
+getTensorVars(Assignment assignment);
 
 /// Lower an index expression to an IR expression that computes the index
 /// expression for one point in the iteration space (a scalar computation)
 ir::Expr
 lowerToScalarExpression(const IndexExpr& indexExpr,
                         const Iterators& iterators,
-                        const IterationSchedule& schedule,
-                        const std::map<TensorBase,ir::Expr>& temporaries);
+                        const IterationGraph& iterationGraph,
+                        const std::map<TensorVar,ir::Expr>& temporaries);
 
 /// Emit code to merge several tensor path index variables (using a min)
 ir::Stmt mergePathIndexVars(ir::Expr var, std::vector<ir::Expr> pathVars);
 
-ir::Expr min(std::string resultName,
-             const std::vector<storage::Iterator>& iterators,
+ir::Expr min(const std::string resultName,
+             const std::vector<Iterator>& iterators,
              std::vector<ir::Stmt>* statements);
+
+std::pair<ir::Expr,ir::Expr>
+minWithIndicator(const std::string resultName,
+                 const std::vector<Iterator>& iterators,
+                 std::vector<ir::Stmt>* statements);
 
 /// Emit code to print a coordinate
 std::vector<ir::Stmt> printCoordinate(const std::vector<ir::Expr>& indexVars);

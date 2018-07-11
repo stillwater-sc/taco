@@ -34,8 +34,7 @@ IRPrinter::IRPrinter(ostream &s) : IRPrinter(s, false, false) {
 }
 
 IRPrinter::IRPrinter(ostream &s, bool color, bool simplify)
-    : stream(s), indent(0), color(color), simplify(simplify),
-      omitNextParen(false) {
+    : stream(s), indent(0), color(color), simplify(simplify) {
 }
 
 IRPrinter::~IRPrinter() {
@@ -55,23 +54,24 @@ void IRPrinter::visit(const Literal* op) {
   if (color) {
     stream << blue ;
   }
-
-  switch (op->type.getKind()) {
-    case Type::Bool:
-      stream << (bool)op->value;
-      break;
-    case Type::UInt:
-      stream << op->value;
-      break;
-    case Type::Int:
-      stream << op->value;
-      break;
-    case Type::Float:
-      stream << (double)(op->dbl_value);
-      break;
-    case Type::Undefined:
-      taco_ierror << "Undefined type in IR";
-      break;
+  if (op->type.isBool()) {
+    stream << (bool)op->bool_value;
+  }
+  else if (op->type.isUInt()) {
+    stream << op->uint_value;
+  }
+  else if (op->type.isInt()) {
+    stream << op->int_value;
+  }
+  else if (op->type.isFloat()) {
+    stream << (double)(op->float_value);
+  }
+  else if (op->type.isComplex()) {
+    stream << op->complex_value.real() << " + "
+           << op->complex_value.imag() << " * I";
+  }
+  else {
+    taco_ierror << "Undefined type in IR";
   }
 
   if (color) {
@@ -89,40 +89,38 @@ void IRPrinter::visit(const Var* op) {
 }
 
 void IRPrinter::visit(const Neg* op) {
-  omitNextParen = false;
   stream << "-";
+  parentPrecedence = Precedence::NEG;
   op->a.accept(this);
 }
 
 void IRPrinter::visit(const Sqrt* op) {
-  omitNextParen = false;
   stream << "sqrt(";
   op->a.accept(this);
   stream << ")";
 }
 
 void IRPrinter::visit(const Add* op) {
-  printBinOp(op->a, op->b, "+");
+  printBinOp(op->a, op->b, "+", Precedence::ADD);
 }
 
 void IRPrinter::visit(const Sub* op) {
-  printBinOp(op->a, op->b, "-");
+  printBinOp(op->a, op->b, "-", Precedence::SUB);
 }
 
 void IRPrinter::visit(const Mul* op) {
-  printBinOp(op->a, op->b, "*");
+  printBinOp(op->a, op->b, "*", Precedence::MUL);
 }
 
 void IRPrinter::visit(const Div* op) {
-  printBinOp(op->a, op->b, "/");
+  printBinOp(op->a, op->b, "/", Precedence::DIV);
 }
 
 void IRPrinter::visit(const Rem* op) {
-  printBinOp(op->a, op->b, "%");
+  printBinOp(op->a, op->b, "%", Precedence::REM);
 }
 
 void IRPrinter::visit(const Min* op) {
-  omitNextParen = false;
   stream << "min(";
   for (size_t i=0; i<op->operands.size(); i++) {
     op->operands[i].accept(this);
@@ -133,7 +131,6 @@ void IRPrinter::visit(const Min* op) {
 }
 
 void IRPrinter::visit(const Max* op){
-  omitNextParen = false;
   stream << "max(";
   op->a.accept(this);
   stream << ", ";
@@ -142,39 +139,49 @@ void IRPrinter::visit(const Max* op){
 }
 
 void IRPrinter::visit(const BitAnd* op){
-  printBinOp(op->a, op->b, "&");
+  printBinOp(op->a, op->b, "&", Precedence::BAND);
+}
+
+void IRPrinter::visit(const BitOr* op){
+  printBinOp(op->a, op->b, "|", Precedence::BOR);
 }
 
 void IRPrinter::visit(const Eq* op){
-  printBinOp(op->a, op->b, "==");
+  printBinOp(op->a, op->b, "==", Precedence::EQ);
 }
 
 void IRPrinter::visit(const Neq* op) {
-  printBinOp(op->a, op->b, "!=");
+  printBinOp(op->a, op->b, "!=", Precedence::NEQ);
 }
 
 void IRPrinter::visit(const Gt* op) {
-  printBinOp(op->a, op->b, ">");
+  printBinOp(op->a, op->b, ">", Precedence::GT);
 }
 
 void IRPrinter::visit(const Lt* op) {
-  printBinOp(op->a, op->b, "<");
+  printBinOp(op->a, op->b, "<", Precedence::LT);
 }
 
 void IRPrinter::visit(const Gte* op) {
-  printBinOp(op->a, op->b, ">=");
+  printBinOp(op->a, op->b, ">=", Precedence::GTE);
 }
 
 void IRPrinter::visit(const Lte* op) {
-  printBinOp(op->a, op->b, "<=");
+  printBinOp(op->a, op->b, "<=", Precedence::LTE);
 }
 
 void IRPrinter::visit(const And* op) {
-  printBinOp(op->a, op->b, keywordString("&&"));
+  printBinOp(op->a, op->b, keywordString("&&"), Precedence::LAND);
 }
 
 void IRPrinter::visit(const Or* op) {
-  printBinOp(op->a, op->b, keywordString("||"));
+  printBinOp(op->a, op->b, keywordString("||"), Precedence::LOR);
+}
+
+void IRPrinter::visit(const Cast* op) {
+  stream << "(" << keywordString(util::toString(op->type)) << ")";
+  parentPrecedence = Precedence::CAST;
+  op->a.accept(this);
 }
 
 void IRPrinter::visit(const IfThenElse* op) {
@@ -183,9 +190,8 @@ void IRPrinter::visit(const IfThenElse* op) {
   doIndent();
   stream << keywordString("if ");
   stream << "(";
-  omitNextParen = true;
+  parentPrecedence = Precedence::TOP;
   op->cond.accept(this);
-  omitNextParen = false;
   stream << ")";
 
   Stmt scopedStmt = Stmt(to<Scope>(op->then)->scopedStmt);
@@ -211,15 +217,15 @@ void IRPrinter::visit(const IfThenElse* op) {
   if (op->otherwise.defined()) {
     stream << "\n";
     doIndent();
-    stream << "else {\n";
+    stream << keywordString("else");
+    stream << " {\n";
 
-    doIndent();
-    stream << "\n";
     op->otherwise.accept(this);
     stream << "\n";
     doIndent();
     stream << "}";
   }
+    stream << endl;
 }
 
 void IRPrinter::visit(const Case* op) {
@@ -230,17 +236,15 @@ void IRPrinter::visit(const Case* op) {
     if (i == 0) {
       stream << keywordString("if ");
       stream << "(";
-      omitNextParen = true;
+      parentPrecedence = Precedence::TOP;
       clause.first.accept(this);
-      omitNextParen = false;
       stream << ")";
     }
     else if (i < op->clauses.size()-1 || !op->alwaysMatch) {
       stream << keywordString("else if ");
       stream << "(";
-      omitNextParen = true;
+      parentPrecedence = Precedence::TOP;
       clause.first.accept(this);
-      omitNextParen = false;
       stream << ")";
     }
     else {
@@ -252,14 +256,44 @@ void IRPrinter::visit(const Case* op) {
     doIndent();
     stream << "}";
   }
+  stream << endl;
+}
+
+void IRPrinter::visit(const Switch* op) {
+  doIndent();
+  stream << keywordString("switch ");
+  stream << "(";
+  op->controlExpr.accept(this);
+  stream << ") {\n";
+  indent++;
+  for (const auto& switchCase : op->cases) {
+    doIndent();
+    stream << keywordString("case ");
+    parentPrecedence = Precedence::TOP;
+    switchCase.first.accept(this);
+    stream << ": {\n";
+    switchCase.second.accept(this);
+    stream << "\n";
+    indent++;
+    doIndent();
+    indent--;
+    stream << keywordString("break");
+    stream << ";\n";
+    doIndent();
+    stream << "}\n";
+  }
+  indent--;
+  doIndent();
+  stream << "}";
+  stream << endl;
 }
 
 void IRPrinter::visit(const Load* op) {
+  parentPrecedence = Precedence::LOAD;
   op->arr.accept(this);
   stream << "[";
-  omitNextParen = true;
+  parentPrecedence = Precedence::LOAD;
   op->loc.accept(this);
-  omitNextParen = false;
   stream << "]";
 }
 
@@ -267,12 +301,13 @@ void IRPrinter::visit(const Store* op) {
   doIndent();
   op->arr.accept(this);
   stream << "[";
+  parentPrecedence = Precedence::TOP;
   op->loc.accept(this);
   stream << "] = ";
-  omitNextParen = true;
+  parentPrecedence = Precedence::TOP;
   op->data.accept(this);
-  omitNextParen = false;
   stream << ";";
+  stream << endl;
 }
 
 void IRPrinter::visit(const For* op) {
@@ -289,8 +324,9 @@ void IRPrinter::visit(const For* op) {
   stream << keywordString("; ");
   op->var.accept(this);
 
-  auto literal = op->increment.as<Literal>();
-  if (literal != nullptr && literal->value == 1) {
+  auto lit = op->increment.as<Literal>();
+  if (lit != nullptr && ((lit->type.isInt()  && lit->int_value  == 1) ||
+                         (lit->type.isUInt() && lit->uint_value == 1))) {
     stream << "++";
   }
   else {
@@ -300,25 +336,29 @@ void IRPrinter::visit(const For* op) {
   stream << ") {\n";
 
   op->contents.accept(this);
-  stream << "\n";
   doIndent();
   stream << "}";
+  stream << endl;
 }
 
 void IRPrinter::visit(const While* op) {
   doIndent();
   stream << keywordString("while ");
+  stream << "(";
+  parentPrecedence = Precedence::TOP;
   op->cond.accept(this);
+  stream << ")";
   stream << " {\n";
 
   op->contents.accept(this);
   stream << "\n";
   doIndent();
   stream << "}";
+  stream << endl;
 }
 
 void IRPrinter::visit(const Block* op) {
-  acceptJoin(this, stream, op->contents, "\n");
+  acceptJoin(this, stream, op->contents, "");
 }
 
 void IRPrinter::visit(const Scope* op) {
@@ -355,20 +395,30 @@ void IRPrinter::visit(const VarAssign* op) {
     varNames.insert({op->lhs, varName});
   }
   op->lhs.accept(this);
-  omitNextParen = true;
+  parentPrecedence = Precedence::TOP;
   bool printed = false;
   if (simplify) {
     const Add* add = op->rhs.as<Add>();
-    if (add != nullptr && add->a == op->lhs) {
-      const Literal* lit = add->b.as<Literal>();
-      if (lit != nullptr && lit->type == Type::Int && lit->value == 1){
-        stream << "++";
+    if (add != nullptr) {
+      if (add->a == op->lhs) {
+        const Literal* lit = add->b.as<Literal>();
+        if (lit != nullptr && ((lit->type.isInt()  && lit->int_value  == 1) ||
+                               (lit->type.isUInt() && lit->uint_value == 1))) {
+          stream << "++";
+        }
+        else {
+          stream << " += ";
+          add->b.accept(this);
+        }
+        printed = true;
       }
-      else {
-        stream << " += ";
-        add->b.accept(this);
+    } else {
+      const BitOr* bitOr = op->rhs.as<BitOr>();
+      if (bitOr != nullptr && bitOr->a == op->lhs) {
+        stream << " |= ";
+        bitOr->b.accept(this);
+        printed = true;
       }
-      printed = true;
     }
   }
   if (!printed) {
@@ -376,8 +426,8 @@ void IRPrinter::visit(const VarAssign* op) {
     op->rhs.accept(this);
   }
 
-  omitNextParen = false;
   stream << ";";
+  stream << endl;
 }
 
 void IRPrinter::visit(const Allocate* op) {
@@ -390,14 +440,17 @@ void IRPrinter::visit(const Allocate* op) {
   stream << "[";
   op->num_elements.accept(this);
   stream << "]";
+  stream << endl;
 }
 
 void IRPrinter::visit(const Comment* op) {
   doIndent();
   stream << commentString(op->text);
+  stream << endl;
 }
 
 void IRPrinter::visit(const BlankLine*) {
+  stream << endl;
 }
 
 void IRPrinter::visit(const Print* op) {
@@ -409,6 +462,7 @@ void IRPrinter::visit(const Print* op) {
     e.accept(this);
   }
   stream << ");";
+  stream << endl;
 }
 
 void IRPrinter::visit(const GetProperty* op) {
@@ -464,17 +518,19 @@ void IRPrinter::doIndent() {
     stream << "  ";
 }
 
-void IRPrinter::printBinOp(Expr a, Expr b, string op) {
-  bool omitParen = omitNextParen;
-  omitNextParen = false;
-
-  if (!omitParen)
+void IRPrinter::printBinOp(Expr a, Expr b, string op, Precedence precedence) {
+  bool parenthesize = precedence > parentPrecedence;
+  if (parenthesize) {
     stream << "(";
+  }
+  parentPrecedence = precedence;
   a.accept(this);
   stream << " " << op << " ";
+  parentPrecedence = precedence;
   b.accept(this);
-  if (!omitParen)
+  if (parenthesize) {
     stream << ")";
+  }
 }
 
 

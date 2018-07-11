@@ -3,34 +3,32 @@
 #include <vector>
 #include <iostream>
 
-#include "taco/tensor.h"
-#include "taco/expr.h"
 #include "taco/error.h"
+#include "taco/index_notation/index_notation.h"
 #include "taco/util/strings.h"
 #include "taco/util/collections.h"
 
 using namespace std;
 
 namespace taco {
-namespace lower {
+namespace old {
 
 // class TensorPath
 struct TensorPath::Content {
-  TensorBase  tensor;
+  Content(vector<IndexVar> vars, Access access) : vars(vars), access(access) {}
   vector<IndexVar> vars;
+  Access access;
 };
 
 TensorPath::TensorPath() : content(nullptr) {
 }
 
-TensorPath::TensorPath(const TensorBase& tensor, const vector<IndexVar>& vars)
-    : content(new TensorPath::Content) {
-  content->tensor = tensor;
-  content->vars   = vars;
+TensorPath::TensorPath(const vector<IndexVar>& vars, const Access& access)
+    : content(new TensorPath::Content(vars, access)) {
 }
 
-const TensorBase& TensorPath::getTensor() const {
-  return content->tensor;
+const Access& TensorPath::getAccess() const {
+  return content->access;
 }
 
 const std::vector<IndexVar>& TensorPath::getVariables() const {
@@ -74,7 +72,7 @@ bool operator<(const TensorPath& l, const TensorPath& r) {
 
 std::ostream& operator<<(std::ostream& os, const TensorPath& path) {
   if (!path.defined()) return os << "Path()";
-  return os << path.getTensor().getName() << "["
+  return os << path.getAccess().getTensorVar().getName() << "["
             << "->" << util::join(path.getVariables(), "->") << "]";
 }
 
@@ -85,7 +83,7 @@ TensorPathStep::TensorPathStep() : step(-1) {
 
 TensorPathStep::TensorPathStep(const TensorPath& path, int step)
     : path(path), step(step) {
-  taco_iassert(step >= -1);
+  taco_iassert(step >= 0);
   taco_iassert(step < (int)path.getVariables().size())
       << "step: " << step << std::endl << "path: " << path;
 }
@@ -109,7 +107,7 @@ bool operator<(const TensorPathStep& l, const TensorPathStep& r) {
 
 std::ostream& operator<<(std::ostream& os, const TensorPathStep& step) {
   if (!step.getPath().defined()) return os << "Step()";
-  return os << step.getPath().getTensor().getName()
+  return os << step.getPath().getAccess().getTensorVar().getName()
             << (step.getStep() >= 0
                 ? to_string(step.getStep())
                 : "root");
