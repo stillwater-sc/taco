@@ -13,68 +13,22 @@ namespace ir {
 Expr::Expr(bool n) : IRHandle(Literal::make(n)) {
 }
 
-Expr::Expr(int n)  : IRHandle(Literal::make(n)) {
+Expr::Expr(int n)  : IRHandle(Literal::make((int32_t)n)) {
+  taco_iassert(sizeof(int) == 4) << "Non-32 bit int not supported";
 }
 
-Expr::Expr(long long n) : IRHandle(Literal::make(n)) {
+Expr::Expr(long long n) : IRHandle(Literal::make((uint64_t)n)) {
+  taco_iassert(sizeof(long long) == 8) << "Non-64 bit long long int not supported";
 }
 
 Expr::Expr(double n) : IRHandle(Literal::make(n)) {
 }
 
-Expr::Expr(unsigned long long n) : IRHandle(Literal::make(n)) {
+Expr::Expr(unsigned long long n) : IRHandle(Literal::make((uint64_t)n)) {
+  taco_iassert(sizeof(unsigned long long) == 8) << "Non-64 bit unsigned long long int not supported";
 }
 
 Expr::Expr(std::complex<double> n) : IRHandle(Literal::make(n)) {
-}
-  
-Expr Literal::make(bool val) {
-  Literal *lit = new Literal;
-  lit->type = Datatype(Datatype::Bool);
-  lit->bool_value = val;
-  return lit;
-}
-
-Expr Literal::make(int val) {
-  Literal *lit = new Literal;
-  lit->type = taco::type<int>();
-  lit->int_value = (int)val;
-  return lit;
-}
-
-Expr Literal::make(uint32_t val) {
-  Literal *lit = new Literal;
-  lit->type = taco::type<uint32_t>();
-  lit->uint_value = val;
-  return lit;
-}
-
-Expr Literal::make(long long val) {
-  Literal *lit = new Literal;
-  lit->type = taco::type<long long>();
-  lit->int_value = (long long)val;
-  return lit;
-}
-
-Expr Literal::make(unsigned long long val) {
-  Literal *lit = new Literal;
-  lit->type = taco::type<unsigned long long>();;
-  lit->uint_value = (unsigned long long)val;
-  return lit;
-}
-
-Expr Literal::make(std::complex<double> val) {
-  Literal *lit = new Literal;
-  lit->type = taco::type<std::complex<double>>();
-  lit->complex_value = (std::complex<double>)val;
-  return lit;
-}
-
-Expr Literal::make(double val) {
-  Literal *lit = new Literal;
-  lit->type = taco::type<double>();;
-  lit->float_value = val;
-  return lit;
 }
 
 Expr Literal::zero(Datatype datatype) {
@@ -133,11 +87,140 @@ Expr Literal::zero(Datatype datatype) {
     return zero;
 }
 
+Literal::~Literal() {
+  free(value);
+}
+
+bool Literal::getBoolValue() const {
+  taco_iassert(type.isBool()) << "Type must be boolean";
+  return getValue<bool>();
+}
+
+int64_t Literal::getIntValue() const {
+  taco_iassert(type.isInt()) << "Type must be integer";
+  switch (type.getKind()) {
+    case Datatype::Int8:
+      return getValue<int8_t>();
+    case Datatype::Int16:
+      return getValue<int16_t>();
+    case Datatype::Int32:
+      return getValue<int32_t>();
+    case Datatype::Int64:
+      return getValue<int64_t>();
+    case Datatype::Int128:
+      taco_not_supported_yet;
+    default:
+      break;
+  }
+  taco_ierror << "not an integer type";
+  return 0ll;
+}
+
+uint64_t Literal::getUIntValue() const {
+  taco_iassert(type.isUInt()) << "Type must be unsigned integer";
+  switch (type.getKind()) {
+    case Datatype::UInt8:
+      return getValue<uint8_t>();
+    case Datatype::UInt16:
+      return getValue<uint16_t>();
+    case Datatype::UInt32:
+      return getValue<uint32_t>();
+    case Datatype::UInt64:
+      return getValue<uint64_t>();
+    case Datatype::UInt128:
+      taco_not_supported_yet;
+    default:
+      break;
+  }
+  taco_ierror << "not an unsigned integer type";
+  return 0ull;
+}
+
+double Literal::getFloatValue() const {
+  taco_iassert(type.isFloat()) << "Type must be floating point";
+  switch (type.getKind()) {
+    case Datatype::Float32:
+      static_assert(sizeof(float) == 4, "Float not 32 bits");
+      return getValue<float>();
+    case Datatype::Float64:
+      return getValue<double>();
+    default:
+      break;
+  }
+  taco_ierror << "not a floating point type";
+  return 0.0;
+}
+
+std::complex<double> Literal::getComplexValue() const {
+  taco_iassert(type.isComplex()) << "Type must be a complex number";
+  switch (type.getKind()) {
+    case Datatype::Complex64:
+      return getValue<std::complex<float>>();
+    case Datatype::Complex128:
+      return getValue<std::complex<double>>();
+    default:
+      break;
+  }
+  taco_ierror << "not a floating point type";
+  return 0.0;
+}
+
+template <typename T> bool compare(const Literal* literal, double val) {
+      return literal->getValue<T>() == static_cast<T>(val);
+}
+
 bool Literal::equalsScalar(double scalar) const {
-  return (type.isInt() && int_value == (int) scalar) ||
-      (type.isUInt() && uint_value == (uint) scalar) ||
-      (type.isFloat() && abs(float_value-scalar) < 10e-6) ||
-  (type.isComplex() && std::abs(complex_value - scalar) < 10e-6);
+  switch (type.getKind()) {
+    case Datatype::Bool:
+      return compare<bool>(this, scalar);
+    break;
+    case Datatype::UInt8:
+      return compare<uint8_t>(this, scalar);
+    break;
+    case Datatype::UInt16:
+      return compare<uint16_t>(this, scalar);
+    break;
+    case Datatype::UInt32:
+      return compare<uint32_t>(this, scalar);
+    break;
+    case Datatype::UInt64:
+      return compare<uint64_t>(this, scalar);
+    break;
+    case Datatype::UInt128:
+      taco_not_supported_yet;
+    break;
+    case Datatype::Int8:
+      return compare<int8_t>(this, scalar);
+    break;
+    case Datatype::Int16:
+      return compare<int16_t>(this, scalar);
+    break;
+    case Datatype::Int32:
+      return compare<int32_t>(this, scalar);
+    break;
+    case Datatype::Int64:
+      return compare<int64_t>(this, scalar);
+    break;
+    case Datatype::Int128:
+      taco_not_supported_yet;
+    break;
+    case Datatype::Float32:
+      return compare<float>(this, scalar);
+    break;
+    case Datatype::Float64:
+      return compare<double>(this, scalar);
+    break;
+    case Datatype::Complex64:
+      return compare<std::complex<float>>(this, scalar);
+    break;
+    case Datatype::Complex128:
+      return compare<std::complex<double>>(this, scalar);
+    break;
+    case Datatype::Undefined:
+      taco_not_supported_yet;
+    break;
+  }
+  return false;
 }
 
 Expr Var::make(std::string name, Datatype type, bool is_ptr, bool is_tensor) {
@@ -373,11 +456,12 @@ Expr Cast::make(Expr a, Datatype newType) {
 
 // Load from an array
 Expr Load::make(Expr arr) {
-  return Load::make(arr, Literal::make((long long)0));
+  return Load::make(arr, Literal::make((int64_t)0));
 }
 
 Expr Load::make(Expr arr, Expr loc) {
-  taco_iassert(loc.type().isInt()) << "Can't load from a non-integer offset";
+  taco_iassert(loc.type().isInt() || loc.type().isUInt()) 
+      << "Can't load from a non-integer offset";
   Load *load = new Load;
   load->type = arr.type();
   load->arr = arr;
@@ -390,9 +474,42 @@ Stmt Block::make() {
   return Block::make({});
 }
 
-Stmt Block::make(std::vector<Stmt> b) {
+static bool nop(const Stmt& stmt) {
+  if (!stmt.defined()) return true;
+  if (isa<Block>(stmt) && to<Block>(stmt)->contents.size() == 0) return true;
+  return false;
+}
+
+Stmt Block::make(std::vector<Stmt> stmts) {
   Block *block = new Block;
-  block->contents = b;
+  for (auto& stmt : stmts) {
+    if (nop(stmt)) continue;
+    block->contents.push_back(stmt);
+  }
+  return block;
+}
+
+Stmt Block::blanks(std::vector<Stmt> stmts) {
+  Block *block = new Block;
+
+  // Add first defined statement to result.
+  size_t i = 0;
+  for (; i < stmts.size(); i++) {
+    Stmt stmt = stmts[i];
+    if (nop(stmt)) continue;
+    block->contents.push_back(stmt);
+    break;
+  }
+  i++;
+
+  // Add additional defined statements to result prefixed with a blank line.
+  for (; i < stmts.size(); i++) {
+    Stmt stmt = stmts[i];
+    if (nop(stmt)) continue;
+    block->contents.push_back(BlankLine::make());
+    block->contents.push_back(stmt);
+  }
+
   return block;
 }
 
@@ -500,14 +617,23 @@ Stmt Function::make(std::string name,
   return func;
 }
 
+// VarDecl
+Stmt VarDecl::make(Expr var, Expr rhs) {
+  taco_iassert(var.as<Var>())
+    << "Can only assign to a Var or GetProperty";
+  VarDecl* decl = new VarDecl;
+  decl->var = var;
+  decl->rhs = rhs;
+  return decl;
+}
+
 // VarAssign
-Stmt VarAssign::make(Expr lhs, Expr rhs, bool is_decl) {
+Stmt Assign::make(Expr lhs, Expr rhs) {
   taco_iassert(lhs.as<Var>() || lhs.as<GetProperty>())
     << "Can only assign to a Var or GetProperty";
-  VarAssign *assign = new VarAssign;
+  Assign *assign = new Assign;
   assign->lhs = lhs;
   assign->rhs = rhs;
-  assign->is_decl = is_decl;
   return assign;
 }
 
@@ -516,7 +642,7 @@ Stmt Allocate::make(Expr var, Expr num_elements, bool is_realloc) {
   taco_iassert(var.as<GetProperty>() ||
                (var.as<Var>() && var.as<Var>()->is_ptr)) <<
       "Can only allocate memory for a pointer-typed Var";
-  taco_iassert(num_elements.type().isInt()) <<
+  taco_iassert(num_elements.type().isInt() || num_elements.type().isUInt()) <<
       "Can only allocate an integer-valued number of elements";
   Allocate* alloc = new Allocate;
   alloc->var = var;
@@ -673,8 +799,10 @@ template<> void StmtNode<Scope>::accept(IRVisitorStrict *v)
     const { v->visit((const Scope*)this); }
 template<> void StmtNode<Function>::accept(IRVisitorStrict *v)
     const { v->visit((const Function*)this); }
-template<> void StmtNode<VarAssign>::accept(IRVisitorStrict *v)
-    const { v->visit((const VarAssign*)this); }
+template<> void StmtNode<VarDecl>::accept(IRVisitorStrict *v)
+    const { v->visit((const VarDecl*)this); }
+template<> void StmtNode<Assign>::accept(IRVisitorStrict *v)
+    const { v->visit((const Assign*)this); }
 template<> void StmtNode<Allocate>::accept(IRVisitorStrict *v)
     const { v->visit((const Allocate*)this); }
 template<> void StmtNode<Comment>::accept(IRVisitorStrict *v)

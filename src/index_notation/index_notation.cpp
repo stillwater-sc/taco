@@ -445,7 +445,7 @@ const std::vector<IndexVar>& Access::getIndexVars() const {
   return getNode(*this)->indexVars;
 }
 
-void check(Assignment assignment) {
+static void check(Assignment assignment) {
   auto tensorVar = assignment.getLhs().getTensorVar();
   auto freeVars = assignment.getLhs().getIndexVars();
   auto indexExpr = assignment.getRhs();
@@ -783,7 +783,7 @@ std::vector<IndexVar> IndexStmt::getIndexVars() const {
 map<IndexVar,Dimension> IndexStmt::getIndexVarDomains() {
   map<IndexVar, Dimension> indexVarDomains;
   match(*this,
-    std::function<void(const AssignmentNode*,Matcher*)>([&indexVarDomains](
+    std::function<void(const AssignmentNode*,Matcher*)>([](
         const AssignmentNode* op, Matcher* ctx) {
       ctx->match(op->lhs);
       ctx->match(op->rhs);
@@ -1450,12 +1450,12 @@ IndexStmt makeConcreteNotation(IndexStmt stmt) {
   return stmt;
 }
 
-vector<TensorVar> getResultTensorVars(IndexStmt stmt) {
-  vector<TensorVar> resultTensors;
+std::vector<Access> getResultAccesses(IndexStmt stmt) {
+  vector<Access> result;
   match(stmt,
     function<void(const AssignmentNode*)>([&](const AssignmentNode* op) {
-      taco_iassert(!util::contains(resultTensors, op->lhs.getTensorVar()));
-      resultTensors.push_back(op->lhs.getTensorVar());
+      taco_iassert(!util::contains(result, op->lhs));
+      result.push_back(op->lhs);
     }),
     function<void(const WhereNode*,Matcher*)>([&](const WhereNode* op,
                                                   Matcher* ctx) {
@@ -1466,9 +1466,20 @@ vector<TensorVar> getResultTensorVars(IndexStmt stmt) {
       ctx->match(op->definition);
     })
   );
-  taco_iassert(resultTensors.size() != 0)
+  taco_iassert(result.size() != 0)
       << "An index statement must have at least one result";
-  return resultTensors;
+  return result;
+}
+
+vector<TensorVar> getResultTensorVars(IndexStmt stmt) {
+  vector<TensorVar> result;
+  for (auto& resultAccess : getResultAccesses(stmt)) {
+    taco_iassert(!util::contains(result, resultAccess.getTensorVar()));
+    result.push_back(resultAccess.getTensorVar());
+  }
+  taco_iassert(result.size() != 0)
+      << "An index statement must have at least one result";
+  return result;
 }
 
 vector<TensorVar> getInputTensorVars(IndexStmt stmt) {
@@ -1522,6 +1533,8 @@ std::vector<TensorVar> getTensorVars(IndexStmt stmt) {
 struct GetIndexVars : IndexNotationVisitor {
   vector<IndexVar> indexVars;
   set<IndexVar> seen;
+
+  using IndexNotationVisitor::visit;
 
   void add(const vector<IndexVar>& vars) {
     for (auto& var : vars) {
